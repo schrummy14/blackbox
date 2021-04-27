@@ -7,7 +7,8 @@ import datetime
 
 def search_min(f, domain, budget, batch, resfile,
                rho0=0.5, p=1.0,
-               executor=mp.Pool):
+               executor=mp.Pool,
+               randseed=None):
     """
     Minimize given expensive black-box function and save results into text file.
 
@@ -31,12 +32,20 @@ def search_min(f, domain, budget, batch, resfile,
         Should have a map method and behave as a context manager.
         Allows the user to use various parallelisation tools
         as dask.distributed or pathos.
+    randseed : int, optional
+        This needs to be set to allow the optimisation method
+        to restart. Currently, the user needs to handle how
+        to do the restart.
 
     Returns
     -------
     ndarray
         Optimal parameters.
     """
+    # Set random seed if given
+    if not randseed is None:
+        np.random.seed(randseed)
+
     # space size
     d = len(domain)
 
@@ -69,8 +78,11 @@ def search_min(f, domain, budget, batch, resfile,
         print('[blackbox] evaluating batch %s/%s (samples %s..%s/%s) @ ' % (i+1, (n+m)//batch, i*batch+1, (i+1)*batch, n+m) + \
         str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")) + ' ...')
 
-        with executor() as e:
-            points[batch*i:batch*(i+1), -1] = list(e.map(f, list(map(cubetobox, points[batch*i:batch*(i+1), 0:-1]))))
+        if executor is None:
+            points[batch*i:batch*(i+1), -1] = list([f(x) for x in list(map(cubetobox, points[batch*i:batch*(i+1), 0:-1]))])
+        else:
+            with executor() as e:
+                points[batch*i:batch*(i+1), -1] = list(e.map(f, list(map(cubetobox, points[batch*i:batch*(i+1), 0:-1]))))
 
     # normalizing function values
     fmax = max(abs(points[:, -1]))
@@ -102,8 +114,11 @@ def search_min(f, domain, budget, batch, resfile,
                     break
             points[n+i*batch+j, 0:-1] = np.copy(minfit.x)
 
-        with executor() as e:
-            points[n+batch*i:n+batch*(i+1), -1] = list(e.map(f, list(map(cubetobox, points[n+batch*i:n+batch*(i+1), 0:-1]))))/fmax
+        if executor is None:
+            points[n+batch*i:n+batch*(i+1), -1] = list([f(x)/fmax for x in list(map(cubetobox, points[n+batch*i:n+batch*(i+1), 0:-1]))])
+        else:
+            with executor() as e:
+                points[n+batch*i:n+batch*(i+1), -1] = list(e.map(f, list(map(cubetobox, points[n+batch*i:n+batch*(i+1), 0:-1]))))/fmax
 
     # saving results into text file
     points[:, 0:-1] = list(map(cubetobox, points[:, 0:-1]))
